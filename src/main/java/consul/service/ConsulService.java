@@ -55,6 +55,7 @@ import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.Optional;
 
 /**
  * Uses consul's REST API and exposes certain functionality
@@ -66,8 +67,8 @@ public final class ConsulService {
 	private static final String CONSUL_HEALTH_CHECK_API_ENDPOINT_TEMPLATE =
 			"http://%s:%d/v1/health/service/%s?%s";
 
-	private final String consulAgentHost;
-	private final int consulAgentPort;
+	private final int consulAgentWebServicePort;
+	private final String consulAgentWebServiceAddress;
 	private final String tag;
 
 	/**
@@ -76,9 +77,9 @@ public final class ConsulService {
 	 *                   it is 8500
 	 * @param tag        if not null it will filter query on the tags
 	 */
-	public ConsulService(final String consulHost, final int consulPort, final String tag) {
-		this.consulAgentHost = consulHost;
-		this.consulAgentPort = consulPort;
+	public ConsulService(final String consulAddress, final int consulPort, final String tag) {
+		this.consulAgentWebServiceAddress = consulAddress;
+		this.consulAgentWebServicePort = consulPort;
 		this.tag = tag;
 	}
 
@@ -104,7 +105,7 @@ public final class ConsulService {
 		for (String serviceName : serviceNames) {
 			String consulServiceHealthEndPoint = getConsulHealthCheckApiUrl(serviceName);
 			final String apiResponse = Utility.readUrl(consulServiceHealthEndPoint);
-			HealthCheck[] healthChecks = (HealthCheck[])AccessController.doPrivileged(
+			HealthCheck[] healthChecks = (HealthCheck[]) AccessController.doPrivileged(
 				new PrivilegedAction<HealthCheck[]>() {
 					@Override
 					public HealthCheck[] run() {
@@ -113,9 +114,13 @@ public final class ConsulService {
 				}
 			);
 			Arrays.stream(healthChecks).forEach(healthCheck -> {
-				result.add(new DiscoveryResult(healthCheck.getNode().getAddress(),
-						healthCheck.getService().getPort()));
-			});
+                                String ip = healthCheck.getService().getAddress();
+                                int port = healthCheck.getService().getPort();
+                                if (ip == null || ip.isEmpty()) {
+                                    ip = healthCheck.getNode().getAddress();
+                                }
+                                result.add(new DiscoveryResult(ip, port));
+                            });
 		}
 		return result;
 	}
@@ -123,11 +128,14 @@ public final class ConsulService {
 
 	private final String getConsulHealthCheckApiUrl(final String serviceName) {
 		final StringBuffer queryParam = new StringBuffer("");
-		if (this.tag != null) {
+		if ((this.tag != null) && (!this.tag.equals(""))){
 			queryParam.append("tag=");
 			queryParam.append(tag.trim());
 		}
 		return String.format(CONSUL_HEALTH_CHECK_API_ENDPOINT_TEMPLATE,
-				consulAgentHost, consulAgentPort, serviceName, queryParam.toString());
+				consulAgentWebServiceAddress,
+				consulAgentWebServicePort,
+				serviceName,
+				queryParam.toString());
 	}
 }
